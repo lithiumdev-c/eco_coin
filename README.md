@@ -55,8 +55,8 @@ And start backend
 
 # About hackathon
 
-* **Location:** Atyrau BIL (Atyrau, Kazakhstan)
-* **Organizers:** NIS, BIL, AtyrauHub
+* **Location:** BIL
+* **Organizers:** NIS, BIL
 * **Date:** December 20–21, 2025
 * **Result:** Unfortunately, no place, but special prizes and certificate
 
