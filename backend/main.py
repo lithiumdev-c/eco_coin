@@ -20,7 +20,6 @@ from database import SessionLocal, engine, Base
 from models import User, Image as DBImage
 from pydantic import BaseModel, ConfigDict
 
-# --- ИНИЦИАЛИЗАЦИЯ И НАСТРОЙКИ ---
 Base.metadata.create_all(bind=engine)
 app = FastAPI()
 
@@ -41,22 +40,20 @@ app.add_middleware(
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
-# Настройки YOLO и Эко-логики
 try:
     yolo_model = YOLO("yolov8n.pt")
 except Exception as e:
     print(f"⚠️ Ошибка загрузки YOLO: {e}")
     yolo_model = None
-
-# Маппинг объектов YOLO в категории вознаграждения
+    
 ECO_MAP = {
-    "bottle": "trash",      # Пластиковые бутылки
-    "cup": "trash",         # Стаканчики
-    "can": "trash",         # Консервные банки
-    "wine glass": "trash",  # Стекло
-    "potted plant": "plant",# Комнатные растения
-    "broccoli": "plant",    # Иногда распознает зелень так
-    "bird": "animal",       # Можно добавить бонусы за животных
+    "bottle": "trash",      
+    "cup": "trash",       
+    "can": "trash",         
+    "wine glass": "trash", 
+    "potted plant": "plant",
+    "broccoli": "plant",    
+    "bird": "animal",       
 }
 
 ECO_REWARD = {
@@ -67,7 +64,6 @@ ECO_REWARD = {
     "person": 5,
 }
 
-# --- СХЕМЫ (Pydantic) ---
 class UserCreate(BaseModel):
     username: str
     password: str
@@ -88,7 +84,6 @@ class PurchaseRequest(BaseModel):
     item_id: int
     price: int
 
-# --- ЗАВИСИМОСТИ (ОБЯЗАТЕЛЬНО ВЫШЕ ЭНДПОИНТОВ) ---
 
 def get_db():
     db = SessionLocal()
@@ -128,60 +123,48 @@ def analyze_image_logic(file_path: str):
     if not yolo_model:
         return 0, "Модель не загружена"
     
-    # 1. Запуск YOLO (снижаем порог до 0.2 для лучшего обнаружения)
     results = yolo_model.predict(file_path, conf=0.2, verbose=False)
     
     total_reward = 0
     detected_labels = []
 
-    # Обработка объектов от YOLO
     for r in results:
         for box in r.boxes:
             label = yolo_model.names[int(box.cls[0])].lower()
             
-            # Проверяем по ECO_MAP (мусор, растения в горшках и т.д.)
             eco_cat = ECO_MAP.get(label)
             if eco_cat:
                 reward = ECO_REWARD.get(eco_cat, 0)
                 total_reward += reward
                 detected_labels.append(f"{label} (+{reward})")
             
-            # Если нашли человека, тоже добавим в список (базовые 5 баллов)
             elif label == "person":
                 reward = ECO_REWARD.get("person", 5)
                 total_reward += reward
                 detected_labels.append(f"activist (+{reward})")
 
-    # 2. АНАЛИЗ ЗЕЛЕНИ (Деревья и газон)
     img = cv2.imread(file_path)
     if img is not None:
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
         
-        # Расширенный диапазон зеленого (захватывает и хвою, и траву)
         lower_green = np.array([35, 30, 30]) 
         upper_green = np.array([90, 255, 255])
         
         mask = cv2.inRange(hsv, lower_green, upper_green)
         green_pixel_count = np.count_nonzero(mask)
         green_pct = (green_pixel_count / mask.size) * 100
-
-        # Если зеленого больше 10% — это точно эко-локация
         if green_pct > 10:
             tree_reward = 30
             total_reward += tree_reward
             detected_labels.append(f"greenery {int(green_pct)}% (+{tree_reward})")
 
-    # 3. ИТОГОВЫЙ ОТВЕТ
     if total_reward == 0:
-        # Если YOLO что-то видела, но не экологическое (например, машину)
         raw_detected = [yolo_model.names[int(b.cls[0])] for r in results for b in r.boxes]
         seen = ", ".join(set(raw_detected)) if raw_detected else "ничего"
         return 0, f"Эко-объекты не найдены (увидел: {seen}). Попробуйте другой ракурс."
 
-    # Убираем дубликаты из названий для красивого вывода
     summary = ", ".join(detected_labels)
     return total_reward, f"Обнаружено: {summary}. Итого: {total_reward} EcoCoins."
-# --- ЭНДПОИНТЫ ---
 
 @app.post("/register", response_model=Token)
 async def register(user_in: UserCreate, db: Session = Depends(get_db)):
@@ -228,7 +211,6 @@ async def upload_image(
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    # Запуск анализа
     reward, auto_desc = analyze_image_logic(file_path)
     
     final_desc = f"{description} | {auto_desc}" if description else auto_desc
@@ -264,12 +246,10 @@ async def delete_image(
     if img.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Нельзя удалять чужие фото")
 
-    # Удаляем файл
     file_path = os.path.join(IMAGES_DIR, img.s3_key)
     if os.path.exists(file_path):
         os.remove(file_path)
 
-    # Вычитаем баллы при удалении (по желанию)
     current_user.eco_coins = max(0, (current_user.eco_coins or 0) - img.reward)
     
     db.delete(img)
@@ -289,8 +269,6 @@ async def buy_item(
             status_code=400, 
             detail=f"Недостаточно EcoCoins. У вас {current_user.eco_coins}, нужно {request.price}"
         )
-    
-    # Вычитаем баллы
     current_user.eco_coins -= request.price
     db.commit()
     db.refresh(current_user)
